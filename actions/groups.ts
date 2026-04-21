@@ -1,11 +1,20 @@
 "use server";
 
 import { z } from "zod";
-import { and, eq, max } from "drizzle-orm";
+import { and, eq, inArray, max } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { auth } from "@/lib/auth";
 import { db } from "@/db";
-import { groups, groupTeams } from "@/db/schema";
+import {
+  groups,
+  groupTeams,
+  predictions,
+  matches as matchesTable,
+  rounds,
+  teams,
+} from "@/db/schema";
+import { computeAffectedMatches } from "@/lib/invalidation";
+import type { SlotResolverCtx } from "@/lib/slot-resolver";
 
 async function requireAdmin() {
   const session = await auth();
@@ -15,7 +24,10 @@ async function requireAdmin() {
   return session.user;
 }
 
-export type GroupActionResult = { ok: true } | { ok: false; error: string };
+export type GroupActionResult =
+  | { ok: true }
+  | { ok: false; error: string }
+  | { ok: false; requiresConfirmation: true; affectedCount: number };
 
 const createGroupSchema = z.object({
   tournamentId: z.string().uuid(),
@@ -143,7 +155,8 @@ export async function setTeamPositionAction(
   groupId: string,
   teamId: string,
   position: number | null,
-  tournamentId: string
+  tournamentId: string,
+  confirm: boolean = false
 ): Promise<GroupActionResult> {
   await requireAdmin();
   const parsed = positionSchema.safeParse({
@@ -153,6 +166,32 @@ export async function setTeamPositionAction(
     tournamentId,
   });
   if (!parsed.success) return { ok: false, error: "Inválido" };
+
+  if (parsed.data.position != null) {
+    const ctx = await buildInvalidationContext(tournamentId);
+    const change = {
+      kind: "group_position" as const,
+      groupId: parsed.data.groupId,
+      position: parsed.data.position,
+      newTeamId: parsed.data.teamId,
+    };
+    const affected = computeAffectedMatches(ctx, change);
+    const affectedWithPreds = await filterMatchesWithPredictionsInActiveRounds(
+      affected
+    );
+    if (affectedWithPreds.length > 0 && !confirm) {
+      return {
+        ok: false,
+        requiresConfirmation: true,
+        affectedCount: affectedWithPreds.length,
+      };
+    }
+    if (affectedWithPreds.length > 0 && confirm) {
+      await db
+        .delete(predictions)
+        .where(inArray(predictions.matchId, affectedWithPreds));
+    }
+  }
 
   await db
     .update(groupTeams)
@@ -165,5 +204,73 @@ export async function setTeamPositionAction(
     );
 
   revalidatePath(`/admin/tournaments/${parsed.data.tournamentId}/groups`);
+  revalidatePath(`/admin/tournaments/${parsed.data.tournamentId}/playoff`);
   return { ok: true };
+}
+
+async function buildInvalidationContext(
+  tournamentId: string
+): Promise<SlotResolverCtx> {
+  const [teamsRows, groupTeamsRows, matchesRows] = await Promise.all([
+    db
+      .select({ id: teams.id, name: teams.name })
+      .from(teams)
+      .where(eq(teams.tournamentId, tournamentId)),
+    db
+      .select({
+        groupId: groupTeams.groupId,
+        teamId: groupTeams.teamId,
+        finalPosition: groupTeams.finalPosition,
+      })
+      .from(groupTeams)
+      .innerJoin(groups, eq(groupTeams.groupId, groups.id))
+      .where(eq(groups.tournamentId, tournamentId)),
+    db
+      .select()
+      .from(matchesTable)
+      .innerJoin(rounds, eq(matchesTable.roundId, rounds.id))
+      .where(eq(rounds.tournamentId, tournamentId)),
+  ]);
+
+  const flatMatches = matchesRows.map((r) => r.matches);
+
+  return {
+    teamsById: new Map(teamsRows.map((t) => [t.id, t])),
+    groupTeamsByPosition: new Map(
+      groupTeamsRows
+        .filter((gt) => gt.finalPosition != null)
+        .map((gt) => [`${gt.groupId}:${gt.finalPosition}`, gt.teamId])
+    ),
+    matchesById: new Map(
+      flatMatches.map((m) => [
+        m.id,
+        {
+          id: m.id,
+          slotAType: m.slotAType,
+          slotARef: m.slotARef,
+          slotBType: m.slotBType,
+          slotBRef: m.slotBRef,
+          resultWinnerTeamId: m.resultWinnerTeamId,
+        },
+      ])
+    ),
+  };
+}
+
+async function filterMatchesWithPredictionsInActiveRounds(
+  matchIds: string[]
+): Promise<string[]> {
+  if (matchIds.length === 0) return [];
+  const rows = await db
+    .selectDistinct({ matchId: predictions.matchId })
+    .from(predictions)
+    .innerJoin(matchesTable, eq(predictions.matchId, matchesTable.id))
+    .innerJoin(rounds, eq(matchesTable.roundId, rounds.id))
+    .where(
+      and(
+        inArray(predictions.matchId, matchIds),
+        inArray(rounds.status, ["abierta", "cerrada"])
+      )
+    );
+  return rows.map((r) => r.matchId);
 }

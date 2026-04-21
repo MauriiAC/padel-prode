@@ -77,7 +77,7 @@ export function GroupsEditor({
       if (res.ok) {
         setNewGroupName("");
         toast.success("Zona creada");
-      } else toast.error(res.error);
+      } else if ("error" in res) toast.error(res.error);
     });
   }
 
@@ -88,12 +88,12 @@ export function GroupsEditor({
     if (overId === "unassigned") {
       startTransition(async () => {
         const res = await removeTeamFromGroupAction(teamId, tournamentId);
-        if (!res.ok) toast.error(res.error);
+        if (!res.ok && "error" in res) toast.error(res.error);
       });
     } else {
       startTransition(async () => {
         const res = await assignTeamToGroupAction(overId, teamId, tournamentId);
-        if (!res.ok) toast.error(res.error);
+        if (!res.ok && "error" in res) toast.error(res.error);
       });
     }
   }
@@ -102,7 +102,7 @@ export function GroupsEditor({
     if (!confirm("¿Borrar la zona?")) return;
     startTransition(async () => {
       const res = await deleteGroupAction(groupId, tournamentId);
-      if (!res.ok) toast.error(res.error);
+      if (!res.ok && "error" in res) toast.error(res.error);
     });
   }
 
@@ -113,7 +113,7 @@ export function GroupsEditor({
     formData.set("name", newName);
     startTransition(async () => {
       const res = await renameGroupAction(formData);
-      if (!res.ok) toast.error(res.error);
+      if (!res.ok && "error" in res) toast.error(res.error);
     });
   }
 
