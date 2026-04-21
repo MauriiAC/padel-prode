@@ -47,7 +47,10 @@ export async function ensurePlayoffRoundAction(
     status: "sin_abrir",
   });
 
-  revalidatePath(`/admin/tournaments/${tournamentId}/playoff`);
+  // Note: no revalidatePath here. This action is called from the playoff page's
+  // server component during render; Next.js 15 forbids revalidatePath during
+  // render. The render itself re-queries rounds after insertion, so the newly
+  // created round is picked up naturally.
   return { ok: true };
 }
 
