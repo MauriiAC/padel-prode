@@ -1,12 +1,21 @@
 "use server";
 
 import { z } from "zod";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { auth } from "@/lib/auth";
 import { db } from "@/db";
-import { groups, groupTeams, matches, rounds } from "@/db/schema";
+import {
+  groups,
+  groupTeams,
+  matches,
+  rounds,
+  predictions,
+  teams as teamsTable,
+} from "@/db/schema";
 import { generateMatchesForGroup } from "@/lib/match-generator";
+import { computeAffectedMatches } from "@/lib/invalidation";
+import type { SlotResolverCtx } from "@/lib/slot-resolver";
 
 async function requireAdmin() {
   const session = await auth();
@@ -19,7 +28,8 @@ async function requireAdmin() {
 export type MatchActionResult =
   | { ok: true; regenerated: string[]; skipped: string[]; invalid: string[] }
   | { ok: true }
-  | { ok: false; error: string };
+  | { ok: false; error: string }
+  | { ok: false; requiresConfirmation: true; affectedCount: number };
 
 export async function generateGroupMatchesAction(
   tournamentId: string
@@ -159,7 +169,8 @@ export async function setMatchResultAction(
   matchId: string,
   tournamentId: string,
   winnerTeamId: string | null,
-  sets: 2 | 3 | null
+  sets: 2 | 3 | null,
+  confirm: boolean = false
 ): Promise<MatchActionResult> {
   await requireAdmin();
   const parsed = resultSchema.safeParse({
@@ -188,6 +199,31 @@ export async function setMatchResultAction(
     };
   }
 
+  const ctx = await buildInvalidationContextForMatches(tournamentId);
+  const change = {
+    kind: "match_winner" as const,
+    matchId: parsed.data.matchId,
+    newWinnerTeamId: parsed.data.winnerTeamId,
+  };
+  const affected = computeAffectedMatches(ctx, change);
+  const affectedWithPreds = await filterMatchesWithPredictionsInActiveRounds(
+    affected
+  );
+
+  if (affectedWithPreds.length > 0 && !confirm) {
+    return {
+      ok: false,
+      requiresConfirmation: true,
+      affectedCount: affectedWithPreds.length,
+    };
+  }
+
+  if (affectedWithPreds.length > 0 && confirm) {
+    await db
+      .delete(predictions)
+      .where(inArray(predictions.matchId, affectedWithPreds));
+  }
+
   await db
     .update(matches)
     .set({
@@ -197,7 +233,76 @@ export async function setMatchResultAction(
     .where(eq(matches.id, parsed.data.matchId));
 
   revalidatePath(`/admin/tournaments/${parsed.data.tournamentId}/matches`);
+  revalidatePath(`/admin/tournaments/${parsed.data.tournamentId}/playoff`);
   revalidatePath(`/player/tournaments/${parsed.data.tournamentId}/ranking`);
   revalidatePath(`/player/tournaments/${parsed.data.tournamentId}/groups`);
+  revalidatePath(`/player/tournaments/${parsed.data.tournamentId}/playoff`);
   return { ok: true };
+}
+
+async function buildInvalidationContextForMatches(
+  tournamentId: string
+): Promise<SlotResolverCtx> {
+  const [teamsRows, groupTeamsRows, matchesRows] = await Promise.all([
+    db
+      .select({ id: teamsTable.id, name: teamsTable.name })
+      .from(teamsTable)
+      .where(eq(teamsTable.tournamentId, tournamentId)),
+    db
+      .select({
+        groupId: groupTeams.groupId,
+        teamId: groupTeams.teamId,
+        finalPosition: groupTeams.finalPosition,
+      })
+      .from(groupTeams)
+      .innerJoin(groups, eq(groupTeams.groupId, groups.id))
+      .where(eq(groups.tournamentId, tournamentId)),
+    db
+      .select()
+      .from(matches)
+      .innerJoin(rounds, eq(matches.roundId, rounds.id))
+      .where(eq(rounds.tournamentId, tournamentId)),
+  ]);
+
+  const flatMatches = matchesRows.map((r) => r.matches);
+
+  return {
+    teamsById: new Map(teamsRows.map((t) => [t.id, t])),
+    groupTeamsByPosition: new Map(
+      groupTeamsRows
+        .filter((gt) => gt.finalPosition != null)
+        .map((gt) => [`${gt.groupId}:${gt.finalPosition}`, gt.teamId])
+    ),
+    matchesById: new Map(
+      flatMatches.map((m) => [
+        m.id,
+        {
+          id: m.id,
+          slotAType: m.slotAType,
+          slotARef: m.slotARef,
+          slotBType: m.slotBType,
+          slotBRef: m.slotBRef,
+          resultWinnerTeamId: m.resultWinnerTeamId,
+        },
+      ])
+    ),
+  };
+}
+
+async function filterMatchesWithPredictionsInActiveRounds(
+  matchIds: string[]
+): Promise<string[]> {
+  if (matchIds.length === 0) return [];
+  const rows = await db
+    .selectDistinct({ matchId: predictions.matchId })
+    .from(predictions)
+    .innerJoin(matches, eq(predictions.matchId, matches.id))
+    .innerJoin(rounds, eq(matches.roundId, rounds.id))
+    .where(
+      and(
+        inArray(predictions.matchId, matchIds),
+        inArray(rounds.status, ["abierta", "cerrada"])
+      )
+    );
+  return rows.map((r) => r.matchId);
 }
