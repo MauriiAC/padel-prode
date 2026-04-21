@@ -59,8 +59,8 @@ export async function createUserAction(
 
   try {
     await sendWelcomeEmail({
-      to: email,
-      name: parsed.data.name,
+      targetName: parsed.data.name,
+      targetEmail: email,
       temporaryPassword: tempPassword,
     });
   } catch (err) {
@@ -98,8 +98,8 @@ export async function resendTemporaryPasswordAction(
 
   try {
     await sendWelcomeEmail({
-      to: user.email,
-      name: user.name,
+      targetName: user.name,
+      targetEmail: user.email,
       temporaryPassword: tempPassword,
     });
   } catch (err) {

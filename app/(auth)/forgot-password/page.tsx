@@ -26,8 +26,8 @@ export default function ForgotPasswordPage() {
         {state?.sent ? (
           <div className="space-y-4">
             <p>
-              Si el email está registrado, te enviamos un link para resetear tu contraseña.
-              Revisá tu bandeja.
+              Le avisamos al administrador, que te va a pasar el link para
+              blanquear tu contraseña en cuanto pueda.
             </p>
             <Link href="/login" className="text-primary hover:underline">
               Volver al login
@@ -45,7 +45,7 @@ export default function ForgotPasswordPage() {
               </p>
             )}
             <Button type="submit" className="w-full" disabled={pending}>
-              {pending ? "Enviando..." : "Enviar link de reset"}
+              {pending ? "Avisando..." : "Avisar al administrador"}
             </Button>
             <p className="text-center text-sm">
               <Link href="/login" className="text-primary hover:underline">

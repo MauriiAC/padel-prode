@@ -137,7 +137,11 @@ export async function requestPasswordResetAction(
     });
 
     try {
-      await sendPasswordResetEmail({ to: user.email, name: user.name, token });
+      await sendPasswordResetEmail({
+        targetName: user.name,
+        targetEmail: user.email,
+        token,
+      });
     } catch (err) {
       console.error("[requestPasswordReset] email send failed", err);
       return { error: "No pudimos enviar el mail. Probá de nuevo en un rato." };

@@ -5,6 +5,7 @@ const envSchema = z.object({
   AUTH_SECRET: z.string().min(32, "AUTH_SECRET must be at least 32 chars"),
   RESEND_API_KEY: z.string().min(1),
   RESEND_FROM_EMAIL: z.string().min(1),
+  ADMIN_NOTIFICATION_EMAIL: z.string().email(),
   APP_URL: z.string().url(),
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
 });

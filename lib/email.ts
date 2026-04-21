@@ -4,22 +4,28 @@ import { WelcomeEmail, ResetPasswordEmail } from "./email/templates";
 
 const resend = new Resend(env.RESEND_API_KEY);
 
+/**
+ * Notification flow: all welcome and reset emails go to the configured
+ * ADMIN_NOTIFICATION_EMAIL (sandbox-compatible) so the admin can forward
+ * credentials/links to the target user via WhatsApp or another channel.
+ */
 export async function sendWelcomeEmail(params: {
-  to: string;
-  name: string;
+  targetName: string;
+  targetEmail: string;
   temporaryPassword: string;
 }) {
   const loginUrl = `${env.APP_URL}/login`;
   const html = WelcomeEmail({
-    name: params.name,
+    targetName: params.targetName,
+    targetEmail: params.targetEmail,
     temporaryPassword: params.temporaryPassword,
     loginUrl,
   });
 
   const result = await resend.emails.send({
     from: env.RESEND_FROM_EMAIL,
-    to: params.to,
-    subject: "Bienvenido a Padel Prode",
+    to: env.ADMIN_NOTIFICATION_EMAIL,
+    subject: `Nuevo usuario: ${params.targetName}`,
     html,
   });
 
@@ -30,17 +36,21 @@ export async function sendWelcomeEmail(params: {
 }
 
 export async function sendPasswordResetEmail(params: {
-  to: string;
-  name: string;
+  targetName: string;
+  targetEmail: string;
   token: string;
 }) {
   const resetUrl = `${env.APP_URL}/reset-password/${params.token}`;
-  const html = ResetPasswordEmail({ name: params.name, resetUrl });
+  const html = ResetPasswordEmail({
+    targetName: params.targetName,
+    targetEmail: params.targetEmail,
+    resetUrl,
+  });
 
   const result = await resend.emails.send({
     from: env.RESEND_FROM_EMAIL,
-    to: params.to,
-    subject: "Restablecer tu contraseña",
+    to: env.ADMIN_NOTIFICATION_EMAIL,
+    subject: `Reset de contraseña: ${params.targetName}`,
     html,
   });
 
