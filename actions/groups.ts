@@ -167,6 +167,8 @@ export async function setTeamPositionAction(
   });
   if (!parsed.success) return { ok: false, error: "Inválido" };
 
+  let affectedWithPreds: string[] = [];
+
   if (parsed.data.position != null) {
     const ctx = await buildInvalidationContext(tournamentId);
     const change = {
@@ -176,7 +178,7 @@ export async function setTeamPositionAction(
       newTeamId: parsed.data.teamId,
     };
     const affected = computeAffectedMatches(ctx, change);
-    const affectedWithPreds = await filterMatchesWithPredictionsInActiveRounds(
+    affectedWithPreds = await filterMatchesWithPredictionsInActiveRounds(
       affected
     );
     if (affectedWithPreds.length > 0 && !confirm) {
@@ -186,22 +188,24 @@ export async function setTeamPositionAction(
         affectedCount: affectedWithPreds.length,
       };
     }
-    if (affectedWithPreds.length > 0 && confirm) {
-      await db
+  }
+
+  await db.transaction(async (tx) => {
+    if (affectedWithPreds.length > 0) {
+      await tx
         .delete(predictions)
         .where(inArray(predictions.matchId, affectedWithPreds));
     }
-  }
-
-  await db
-    .update(groupTeams)
-    .set({ finalPosition: parsed.data.position })
-    .where(
-      and(
-        eq(groupTeams.groupId, parsed.data.groupId),
-        eq(groupTeams.teamId, parsed.data.teamId)
-      )
-    );
+    await tx
+      .update(groupTeams)
+      .set({ finalPosition: parsed.data.position })
+      .where(
+        and(
+          eq(groupTeams.groupId, parsed.data.groupId),
+          eq(groupTeams.teamId, parsed.data.teamId)
+        )
+      );
+  });
 
   revalidatePath(`/admin/tournaments/${parsed.data.tournamentId}/groups`);
   revalidatePath(`/admin/tournaments/${parsed.data.tournamentId}/playoff`);

@@ -218,19 +218,20 @@ export async function setMatchResultAction(
     };
   }
 
-  if (affectedWithPreds.length > 0 && confirm) {
-    await db
-      .delete(predictions)
-      .where(inArray(predictions.matchId, affectedWithPreds));
-  }
-
-  await db
-    .update(matches)
-    .set({
-      resultWinnerTeamId: parsed.data.winnerTeamId,
-      resultSets: parsed.data.sets,
-    })
-    .where(eq(matches.id, parsed.data.matchId));
+  await db.transaction(async (tx) => {
+    if (affectedWithPreds.length > 0) {
+      await tx
+        .delete(predictions)
+        .where(inArray(predictions.matchId, affectedWithPreds));
+    }
+    await tx
+      .update(matches)
+      .set({
+        resultWinnerTeamId: parsed.data.winnerTeamId,
+        resultSets: parsed.data.sets,
+      })
+      .where(eq(matches.id, parsed.data.matchId));
+  });
 
   revalidatePath(`/admin/tournaments/${parsed.data.tournamentId}/matches`);
   revalidatePath(`/admin/tournaments/${parsed.data.tournamentId}/playoff`);

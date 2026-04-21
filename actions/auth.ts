@@ -191,19 +191,16 @@ export async function resetPasswordAction(
 
   const newHash = await hashPassword(parsed.data.newPassword);
 
-  // Neon HTTP driver does not support transactions; execute sequentially.
-  // On password update failure, user cannot log in — reset token remains
-  // unused so it can be retried. On token-used-at failure after password
-  // update, the token becomes reusable but password already changed.
-  // Acceptable trade-off for small personal project.
-  await db
-    .update(users)
-    .set({ passwordHash: newHash, mustChangePassword: false })
-    .where(eq(users.id, row.userId));
-  await db
-    .update(passwordResetTokens)
-    .set({ usedAt: new Date() })
-    .where(eq(passwordResetTokens.token, row.token));
+  await db.transaction(async (tx) => {
+    await tx
+      .update(users)
+      .set({ passwordHash: newHash, mustChangePassword: false })
+      .where(eq(users.id, row.userId));
+    await tx
+      .update(passwordResetTokens)
+      .set({ usedAt: new Date() })
+      .where(eq(passwordResetTokens.token, row.token));
+  });
 
   return { success: true };
 }
