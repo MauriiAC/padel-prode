@@ -32,7 +32,7 @@ Ver [docs/superpowers/specs/2026-04-21-padel-prode-design.md](docs/superpowers/s
    docker compose up -d
    ```
 
-   Esto corre Postgres 16 en el puerto 5432 con credenciales `padel:padel` y DB `padel_prode` (persistente en volumen Docker).
+   Esto corre Postgres 16 en el puerto 5433 (5432 lo dejamos libre para otros usos) con credenciales `padel:padel` y DB `padel_prode` (persistente en volumen Docker).
 
 3. **Obtener API key de Resend** en https://resend.com. Para el FROM podés usar `onboarding@resend.dev` sin verificar dominio (solo te deja mandar a tu email registrado; para producción verificá un dominio propio).
 
