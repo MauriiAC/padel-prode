@@ -13,7 +13,10 @@ import {
   rounds,
   teams,
 } from "@/db/schema";
-import { computeAffectedMatches } from "@/lib/invalidation";
+import {
+  computeAffectedMatches,
+  diffResolvedMatches,
+} from "@/lib/invalidation";
 import type { SlotResolverCtx } from "@/lib/slot-resolver";
 
 async function requireAdmin() {
@@ -277,4 +280,113 @@ async function filterMatchesWithPredictionsInActiveRounds(
       )
     );
   return rows.map((r) => r.matchId);
+}
+
+const positionEntrySchema = z.object({
+  groupId: z.string().uuid(),
+  teamId: z.string().uuid(),
+  finalPosition: z.number().int().positive().nullable(),
+});
+
+const setGroupPositionsSchema = z.object({
+  tournamentId: z.string().uuid(),
+  positions: z.array(positionEntrySchema),
+});
+
+type PositionEntry = z.infer<typeof positionEntrySchema>;
+
+export async function setGroupPositionsAction(
+  tournamentId: string,
+  positions: PositionEntry[],
+  confirm: boolean = false
+): Promise<GroupActionResult> {
+  await requireAdmin();
+  const parsed = setGroupPositionsSchema.safeParse({ tournamentId, positions });
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? "Inválido" };
+  }
+
+  // Group incoming entries by groupId.
+  const byGroup = new Map<string, PositionEntry[]>();
+  for (const p of parsed.data.positions) {
+    const arr = byGroup.get(p.groupId) ?? [];
+    arr.push(p);
+    byGroup.set(p.groupId, arr);
+  }
+
+  // Validate per group: positions in [1, n], unique among non-null.
+  for (const [gid, entries] of byGroup.entries()) {
+    const n = entries.length;
+    const seen = new Set<number>();
+    for (const e of entries) {
+      if (e.finalPosition == null) continue;
+      if (e.finalPosition < 1 || e.finalPosition > n) {
+        return {
+          ok: false,
+          error: `Las posiciones deben ser entre 1 y ${n}`,
+        };
+      }
+      if (seen.has(e.finalPosition)) {
+        return {
+          ok: false,
+          error: "Las posiciones no pueden repetirse en una zona",
+        };
+      }
+      seen.add(e.finalPosition);
+    }
+  }
+
+  // Build proposed ctx by replacing positions for the affected groups.
+  const ctx = await buildInvalidationContext(tournamentId);
+  const affectedGroupIds = new Set(byGroup.keys());
+  const nextPositions = new Map(ctx.groupTeamsByPosition);
+  for (const key of Array.from(nextPositions.keys())) {
+    const [gid] = key.split(":");
+    if (affectedGroupIds.has(gid)) nextPositions.delete(key);
+  }
+  for (const p of parsed.data.positions) {
+    if (p.finalPosition != null) {
+      nextPositions.set(`${p.groupId}:${p.finalPosition}`, p.teamId);
+    }
+  }
+  const nextCtx: SlotResolverCtx = {
+    ...ctx,
+    groupTeamsByPosition: nextPositions,
+  };
+
+  const affected = diffResolvedMatches(ctx, nextCtx);
+  const affectedWithPreds = await filterMatchesWithPredictionsInActiveRounds(
+    affected
+  );
+
+  if (affectedWithPreds.length > 0 && !confirm) {
+    return {
+      ok: false,
+      requiresConfirmation: true,
+      affectedCount: affectedWithPreds.length,
+    };
+  }
+
+  await db.transaction(async (tx) => {
+    if (affectedWithPreds.length > 0) {
+      await tx
+        .delete(predictions)
+        .where(inArray(predictions.matchId, affectedWithPreds));
+    }
+    for (const p of parsed.data.positions) {
+      await tx
+        .update(groupTeams)
+        .set({ finalPosition: p.finalPosition })
+        .where(
+          and(
+            eq(groupTeams.groupId, p.groupId),
+            eq(groupTeams.teamId, p.teamId)
+          )
+        );
+    }
+  });
+
+  revalidatePath(`/admin/tournaments/${parsed.data.tournamentId}/groups`);
+  revalidatePath(`/admin/tournaments/${parsed.data.tournamentId}/playoff`);
+  return { ok: true };
 }

@@ -28,25 +28,33 @@ export function computeAffectedMatches(
   ctx: InvalidationCtx,
   change: ProposedChange
 ): string[] {
-  const matches = Array.from(ctx.matchesById.values());
-  const before = new Map<string, [string | null, string | null]>();
-  for (const m of matches) {
-    before.set(m.id, resolvePair(m, ctx));
-  }
-
   const nextCtx = applyChange(ctx, change);
+  return diffResolvedMatches(ctx, nextCtx);
+}
 
-  // First pass: find directly affected matches (resolved slots differ)
+/**
+ * Diffs resolved match teams between two contexts. Returns match IDs whose
+ * resolved pair (slotA.team, slotB.team) differs, plus transitive descendants
+ * via match_winner/match_loser refs.
+ *
+ * Both contexts must have the same `matchesById` keys; only
+ * `groupTeamsByPosition` and/or match `resultWinnerTeamId` should differ.
+ */
+export function diffResolvedMatches(
+  oldCtx: SlotResolverCtx,
+  newCtx: SlotResolverCtx
+): string[] {
+  const matches = Array.from(oldCtx.matchesById.values());
+
   const directlyAffected = new Set<string>();
   for (const m of matches) {
-    const next = resolvePair(m, nextCtx);
-    const prev = before.get(m.id)!;
+    const prev = resolvePair(m, oldCtx);
+    const next = resolvePair(m, newCtx);
     if (next[0] !== prev[0] || next[1] !== prev[1]) {
       directlyAffected.add(m.id);
     }
   }
 
-  // BFS: propagate to any match whose slot references an already-affected match
   const affected = new Set<string>(directlyAffected);
   const queue = Array.from(directlyAffected);
   while (queue.length > 0) {
@@ -54,10 +62,10 @@ export function computeAffectedMatches(
     for (const m of matches) {
       if (affected.has(m.id)) continue;
       const refsAffected =
-        (m.slotAType === "match_winner" || m.slotAType === "match_loser") &&
-        m.slotARef === affectedId ||
-        (m.slotBType === "match_winner" || m.slotBType === "match_loser") &&
-        m.slotBRef === affectedId;
+        ((m.slotAType === "match_winner" || m.slotAType === "match_loser") &&
+          m.slotARef === affectedId) ||
+        ((m.slotBType === "match_winner" || m.slotBType === "match_loser") &&
+          m.slotBRef === affectedId);
       if (refsAffected) {
         affected.add(m.id);
         queue.push(m.id);
