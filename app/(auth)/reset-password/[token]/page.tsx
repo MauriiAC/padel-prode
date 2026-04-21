@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect } from "react";
+import { useActionState, useEffect, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { resetPasswordAction, type ResetPasswordState } from "@/actions/auth";
 import { Button } from "@/components/ui/button";
@@ -16,11 +16,13 @@ export default function ResetPasswordPage() {
     undefined
   );
   const router = useRouter();
+  const handledRef = useRef(false);
 
   useEffect(() => {
-    if (state?.success) {
+    if (state?.success && !handledRef.current) {
+      handledRef.current = true;
       toast.success("Contraseña restablecida. Ingresá con la nueva.");
-      router.push("/login");
+      router.replace("/login");
     }
   }, [state, router]);
 

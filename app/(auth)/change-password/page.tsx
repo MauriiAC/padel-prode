@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect } from "react";
+import { useActionState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import {
@@ -21,11 +21,16 @@ export default function ChangePasswordPage() {
   );
   const router = useRouter();
   const { update } = useSession();
+  const handledRef = useRef(false);
 
   useEffect(() => {
-    if (state?.success) {
+    if (state?.success && !handledRef.current) {
+      handledRef.current = true;
       toast.success("Contraseña actualizada");
-      update({ mustChangePassword: false }).then(() => router.push("/"));
+      update({ mustChangePassword: false }).then(() => {
+        router.replace("/");
+        router.refresh();
+      });
     }
   }, [state, router, update]);
 
