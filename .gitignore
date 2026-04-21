@@ -49,7 +49,7 @@ drizzle/
 *.swo
 
 # Claude Code
-.claude/settings.local.json
+.claude/
 
 # OS
 Thumbs.db
