@@ -8,6 +8,13 @@
       "when": 1776744227533,
       "tag": "0000_strange_argent",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1776747682537,
+      "tag": "0001_outgoing_black_widow",
+      "breakpoints": true
     }
   ]
 }

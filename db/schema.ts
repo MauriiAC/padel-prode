@@ -167,6 +167,9 @@ export const matches = pgTable(
     roundId: uuid("round_id")
       .notNull()
       .references(() => rounds.id, { onDelete: "cascade" }),
+    groupId: uuid("group_id").references(() => groups.id, {
+      onDelete: "cascade",
+    }),
     order: integer("order").notNull(),
     slotAType: slotTypeEnum("slot_a_type").notNull(),
     slotARef: text("slot_a_ref"),
@@ -180,6 +183,7 @@ export const matches = pgTable(
   },
   (table) => ({
     roundIdx: index("matches_round_idx").on(table.roundId),
+    groupIdx: index("matches_group_idx").on(table.groupId),
   })
 );
 
