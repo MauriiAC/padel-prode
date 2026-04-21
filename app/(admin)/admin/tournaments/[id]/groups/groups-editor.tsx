@@ -121,7 +121,7 @@ export function GroupsEditor({
     startTransition(async () => {
       const res = await generateGroupMatchesAction(tournamentId);
       if (!res.ok) {
-        toast.error(res.error);
+        if ("error" in res) toast.error(res.error);
         return;
       }
       if ("regenerated" in res) {

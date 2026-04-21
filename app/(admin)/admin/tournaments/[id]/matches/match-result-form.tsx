@@ -1,9 +1,10 @@
 "use client";
 
-import { useTransition } from "react";
+import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { setMatchResultAction } from "@/actions/matches";
 import { Button } from "@/components/ui/button";
+import { ConfirmInvalidationDialog } from "@/components/confirm-invalidation-dialog";
 
 type Team = { id: string; name: string };
 
@@ -23,21 +24,41 @@ export function MatchResultForm({
   currentSets: 2 | 3 | null;
 }) {
   const [pending, startTransition] = useTransition();
+  const [pendingConfirm, setPendingConfirm] = useState<null | {
+    winnerId: string | null;
+    sets: 2 | 3 | null;
+    affectedCount: number;
+  }>(null);
 
-  function save(winnerId: string | null, sets: 2 | 3 | null) {
+  function save(winnerId: string | null, sets: 2 | 3 | null, confirm = false) {
     startTransition(async () => {
       const res = await setMatchResultAction(
         matchId,
         tournamentId,
         winnerId,
-        sets
+        sets,
+        confirm
       );
-      if (res.ok) toast.success("Resultado guardado");
-      else toast.error(res.error);
+      if (res.ok) {
+        toast.success("Resultado guardado");
+        setPendingConfirm(null);
+        return;
+      }
+      if ("requiresConfirmation" in res) {
+        setPendingConfirm({ winnerId, sets, affectedCount: res.affectedCount });
+        return;
+      }
+      toast.error(res.error);
     });
   }
 
+  function confirmInvalidation() {
+    if (!pendingConfirm) return;
+    save(pendingConfirm.winnerId, pendingConfirm.sets, true);
+  }
+
   return (
+    <>
     <div className="flex flex-wrap gap-2 items-center text-sm">
       <select
         value={currentWinnerId ?? ""}
@@ -75,5 +96,12 @@ export function MatchResultForm({
         </Button>
       )}
     </div>
+    <ConfirmInvalidationDialog
+      open={!!pendingConfirm}
+      affectedCount={pendingConfirm?.affectedCount ?? 0}
+      onConfirm={confirmInvalidation}
+      onCancel={() => setPendingConfirm(null)}
+    />
+    </>
   );
 }

@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { setTeamPositionAction } from "@/actions/groups";
+import { ConfirmInvalidationDialog } from "@/components/confirm-invalidation-dialog";
 
 type Team = { id: string; name: string };
 type Group = { id: string; name: string; order: number };
@@ -34,6 +35,12 @@ export function EditPositionsDialog({
 }) {
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
+  const [pendingConfirm, setPendingConfirm] = useState<null | {
+    groupId: string;
+    teamId: string;
+    position: number | null;
+    affectedCount: number;
+  }>(null);
 
   const positionByPair = new Map<string, number | null>(
     assignments.map((a) => [`${a.groupId}:${a.teamId}`, a.finalPosition])
@@ -44,17 +51,40 @@ export function EditPositionsDialog({
     if (parsed !== null && (Number.isNaN(parsed) || parsed < 1 || parsed > 4))
       return;
     startTransition(async () => {
+      const res = await setTeamPositionAction(groupId, teamId, parsed, tournamentId);
+      if (res.ok) return;
+      if ("requiresConfirmation" in res) {
+        setPendingConfirm({
+          groupId,
+          teamId,
+          position: parsed,
+          affectedCount: res.affectedCount,
+        });
+        return;
+      }
+      toast.error(res.error);
+    });
+  }
+
+  function confirmInvalidation() {
+    if (!pendingConfirm) return;
+    const { groupId, teamId, position } = pendingConfirm;
+    startTransition(async () => {
       const res = await setTeamPositionAction(
         groupId,
         teamId,
-        parsed,
-        tournamentId
+        position,
+        tournamentId,
+        true
       );
-      if (!res.ok) toast.error(res.error);
+      if (res.ok) toast.success("Posición actualizada");
+      else if (!("requiresConfirmation" in res)) toast.error(res.error);
+      setPendingConfirm(null);
     });
   }
 
   return (
+    <>
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button variant="outline">Editar posiciones</Button>
@@ -103,5 +133,12 @@ export function EditPositionsDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    <ConfirmInvalidationDialog
+      open={!!pendingConfirm}
+      affectedCount={pendingConfirm?.affectedCount ?? 0}
+      onConfirm={confirmInvalidation}
+      onCancel={() => setPendingConfirm(null)}
+    />
+    </>
   );
 }
