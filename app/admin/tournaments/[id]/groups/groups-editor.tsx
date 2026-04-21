@@ -141,7 +141,9 @@ export function GroupsEditor({
 
   return (
     <DndContext sensors={sensors} onDragEnd={onDragEnd}>
-      <div className="space-y-4">
+      <div
+        className={`space-y-4 transition-opacity ${pending ? "opacity-70 pointer-events-none" : ""}`}
+      >
         <div className="flex flex-wrap gap-2 justify-between items-center">
           <form onSubmit={onCreateGroup} className="flex gap-2 items-center">
             <Input
