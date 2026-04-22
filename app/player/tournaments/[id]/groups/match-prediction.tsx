@@ -3,9 +3,27 @@
 import { useState, useTransition, useRef, useEffect } from "react";
 import { toast } from "sonner";
 import { upsertPredictionAction } from "@/actions/predictions";
+import { computeScore } from "@/lib/scoring";
+import { cn } from "@/lib/utils";
 
 type Team = { id: string; name: string };
 type Prediction = { winnerTeamId: string; sets: 2 | 3 };
+
+function ScoreBadge({ score }: { score: 0 | 1 | 2 }) {
+  const label = score === 0 ? "0 pts" : score === 1 ? "+1 pt" : "+2 pts";
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium",
+        score === 2 && "bg-primary text-primary-foreground",
+        score === 1 && "bg-accent text-accent-foreground",
+        score === 0 && "bg-muted text-muted-foreground"
+      )}
+    >
+      {label}
+    </span>
+  );
+}
 
 export function MatchPrediction({
   tournamentId,
@@ -64,18 +82,34 @@ export function MatchPrediction({
     if (!locked) save(next);
   }
 
+  const resultLoaded = resultWinnerId != null && resultSets != null;
+  const score = resultLoaded
+    ? computeScore(
+        pred
+          ? {
+              predictedWinnerTeamId: pred.winnerTeamId,
+              predictedSets: pred.sets,
+            }
+          : null,
+        { resultWinnerTeamId: resultWinnerId, resultSets: resultSets }
+      )
+    : null;
+
   return (
     <div className="rounded-lg border p-3 space-y-2">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-2">
         <span className="text-sm font-medium">
           {teamA.name} vs {teamB.name}
         </span>
-        {resultWinnerId && resultSets && (
-          <span className="text-xs text-muted-foreground">
-            Resultado: {resultWinnerId === teamA.id ? teamA.name : teamB.name}{" "}
-            en {resultSets} sets
-          </span>
-        )}
+        <div className="flex items-center gap-2">
+          {resultLoaded && (
+            <span className="text-xs text-muted-foreground">
+              Resultado: {resultWinnerId === teamA.id ? teamA.name : teamB.name}{" "}
+              en {resultSets} sets
+            </span>
+          )}
+          {score !== null && <ScoreBadge score={score} />}
+        </div>
       </div>
       <div className="flex gap-4">
         <fieldset className="flex gap-3 items-center" disabled={locked}>
