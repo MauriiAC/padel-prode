@@ -14,7 +14,10 @@ import {
   teams as teamsTable,
 } from "@/db/schema";
 import { generateMatchesForGroup } from "@/lib/match-generator";
-import { computeAffectedMatches } from "@/lib/invalidation";
+import {
+  computeAffectedMatches,
+  diffResolvedMatches,
+} from "@/lib/invalidation";
 import type { SlotResolverCtx } from "@/lib/slot-resolver";
 
 async function requireAdmin() {
@@ -306,4 +309,108 @@ async function filterMatchesWithPredictionsInActiveRounds(
       )
     );
   return rows.map((r) => r.matchId);
+}
+
+const batchResultEntrySchema = z.object({
+  matchId: z.string().uuid(),
+  winnerTeamId: z.string().uuid().nullable(),
+  sets: z.union([z.literal(2), z.literal(3)]).nullable(),
+});
+
+const batchResultSchema = z.object({
+  tournamentId: z.string().uuid(),
+  entries: z.array(batchResultEntrySchema),
+});
+
+export async function setMatchResultsBatchAction(
+  tournamentId: string,
+  entries: Array<{
+    matchId: string;
+    winnerTeamId: string | null;
+    sets: 2 | 3 | null;
+  }>,
+  confirm: boolean = false
+): Promise<MatchActionResult> {
+  await requireAdmin();
+  const parsed = batchResultSchema.safeParse({ tournamentId, entries });
+  if (!parsed.success) return { ok: false, error: "Datos inválidos" };
+  if (parsed.data.entries.length === 0) return { ok: true };
+
+  const matchIds = parsed.data.entries.map((e) => e.matchId);
+  const rows = await db
+    .select({
+      matchId: matches.id,
+      roundStatus: rounds.status,
+      tournamentId: rounds.tournamentId,
+    })
+    .from(matches)
+    .innerJoin(rounds, eq(matches.roundId, rounds.id))
+    .where(inArray(matches.id, matchIds));
+
+  const metaById = new Map(rows.map((r) => [r.matchId, r]));
+
+  for (const e of parsed.data.entries) {
+    const meta = metaById.get(e.matchId);
+    if (!meta) return { ok: false, error: "Partido no encontrado" };
+    if (meta.tournamentId !== parsed.data.tournamentId) {
+      return { ok: false, error: "Partido fuera del torneo" };
+    }
+    if (meta.roundStatus === "sin_abrir") {
+      return {
+        ok: false,
+        error: "Al menos una ronda sigue sin abrir",
+      };
+    }
+  }
+
+  // Build next ctx with all match_winner changes applied; diff once.
+  const ctx = await buildInvalidationContextForMatches(tournamentId);
+  const nextMatches = new Map(ctx.matchesById);
+  for (const e of parsed.data.entries) {
+    const existing = nextMatches.get(e.matchId);
+    if (existing) {
+      nextMatches.set(e.matchId, {
+        ...existing,
+        resultWinnerTeamId: e.winnerTeamId,
+      });
+    }
+  }
+  const nextCtx: SlotResolverCtx = { ...ctx, matchesById: nextMatches };
+
+  const affected = diffResolvedMatches(ctx, nextCtx);
+  const affectedWithPreds = await filterMatchesWithPredictionsInActiveRounds(
+    affected
+  );
+
+  if (affectedWithPreds.length > 0 && !confirm) {
+    return {
+      ok: false,
+      requiresConfirmation: true,
+      affectedCount: affectedWithPreds.length,
+    };
+  }
+
+  await db.transaction(async (tx) => {
+    if (affectedWithPreds.length > 0) {
+      await tx
+        .delete(predictions)
+        .where(inArray(predictions.matchId, affectedWithPreds));
+    }
+    for (const e of parsed.data.entries) {
+      await tx
+        .update(matches)
+        .set({
+          resultWinnerTeamId: e.winnerTeamId,
+          resultSets: e.sets,
+        })
+        .where(eq(matches.id, e.matchId));
+    }
+  });
+
+  revalidatePath(`/admin/tournaments/${parsed.data.tournamentId}/matches`);
+  revalidatePath(`/admin/tournaments/${parsed.data.tournamentId}/playoff`);
+  revalidatePath(`/player/tournaments/${parsed.data.tournamentId}/ranking`);
+  revalidatePath(`/player/tournaments/${parsed.data.tournamentId}/groups`);
+  revalidatePath(`/player/tournaments/${parsed.data.tournamentId}/playoff`);
+  return { ok: true };
 }
