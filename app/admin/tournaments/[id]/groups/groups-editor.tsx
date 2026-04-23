@@ -58,6 +58,14 @@ export function GroupsEditor({
     return map;
   }, [teams, groups, assignments]);
 
+  const positionByPair = useMemo(() => {
+    const m = new Map<string, number | null>();
+    for (const a of assignments) {
+      m.set(`${a.groupId}:${a.teamId}`, a.finalPosition);
+    }
+    return m;
+  }, [assignments]);
+
   const unassignedTeams = useMemo(() => {
     const assignedIds = new Set(assignments.map((a) => a.teamId));
     return teams.filter((t) => !assignedIds.has(t.id));
@@ -177,6 +185,14 @@ export function GroupsEditor({
                 key={g.id}
                 group={g}
                 teams={teamsByGroup.get(g.id) ?? []}
+                positionByTeam={
+                  new Map(
+                    (teamsByGroup.get(g.id) ?? []).map((t) => [
+                      t.id,
+                      positionByPair.get(`${g.id}:${t.id}`) ?? null,
+                    ])
+                  )
+                }
                 onDelete={() => onDeleteGroup(g.id)}
                 onRename={(n) => onRenameGroup(g.id, n)}
               />
@@ -198,11 +214,13 @@ export function GroupsEditor({
 function GroupCard({
   group,
   teams,
+  positionByTeam,
   onDelete,
   onRename,
 }: {
   group: Group;
   teams: Team[];
+  positionByTeam: Map<string, number | null>;
   onDelete: () => void;
   onRename: (name: string) => void;
 }) {
@@ -216,6 +234,21 @@ function GroupCard({
       : count === 0
       ? "text-muted-foreground"
       : "text-destructive";
+
+  const filledPositions = teams.reduce(
+    (acc, t) => (positionByTeam.get(t.id) != null ? acc + 1 : acc),
+    0
+  );
+  const positionsComplete = count > 0 && filledPositions === count;
+
+  const sortedTeams = [...teams].sort((a, b) => {
+    const pa = positionByTeam.get(a.id);
+    const pb = positionByTeam.get(b.id);
+    if (pa == null && pb == null) return a.name.localeCompare(b.name);
+    if (pa == null) return 1;
+    if (pb == null) return -1;
+    return pa - pb;
+  });
 
   return (
     <div
@@ -258,9 +291,23 @@ function GroupCard({
           </>
         )}
       </div>
+      {count > 0 && (
+        <div className="text-xs text-muted-foreground">
+          Posiciones:{" "}
+          <span
+            className={positionsComplete ? "text-primary font-medium" : undefined}
+          >
+            {filledPositions}/{count}
+          </span>
+        </div>
+      )}
       <div className="space-y-1 min-h-[60px]">
-        {teams.map((t) => (
-          <TeamChip key={t.id} team={t} />
+        {sortedTeams.map((t) => (
+          <TeamChip
+            key={t.id}
+            team={t}
+            position={positionByTeam.get(t.id) ?? null}
+          />
         ))}
       </div>
       <button
@@ -295,7 +342,13 @@ function UnassignedList({ teams }: { teams: Team[] }) {
   );
 }
 
-function TeamChip({ team }: { team: Team }) {
+function TeamChip({
+  team,
+  position,
+}: {
+  team: Team;
+  position?: number | null;
+}) {
   const { attributes, listeners, setNodeRef, transform, isDragging } =
     useDraggable({ id: team.id });
   return (
@@ -308,11 +361,16 @@ function TeamChip({ team }: { team: Team }) {
           ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` }
           : undefined
       }
-      className={`px-2 py-1 rounded border bg-background text-sm cursor-grab active:cursor-grabbing ${
+      className={`px-2 py-1 rounded border bg-background text-sm cursor-grab active:cursor-grabbing flex items-center gap-2 ${
         isDragging ? "opacity-50" : ""
       }`}
     >
-      {team.name}
+      {position != null && (
+        <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-primary px-1.5 text-[11px] font-semibold text-primary-foreground">
+          {position}
+        </span>
+      )}
+      <span>{team.name}</span>
     </div>
   );
 }
