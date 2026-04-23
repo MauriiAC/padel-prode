@@ -10,7 +10,11 @@ import {
 } from "@/db/schema";
 import { auth } from "@/lib/auth";
 import { resolveSlot, type SlotResolverCtx } from "@/lib/slot-resolver";
-import { MatchPrediction } from "../groups/match-prediction";
+import {
+  PredictionsPanel,
+  type PanelItem,
+  type PanelSection,
+} from "@/components/predictions/predictions-panel";
 
 export default async function PlayerPlayoffPage({
   params,
@@ -78,76 +82,62 @@ export default async function PlayerPlayoffPage({
     userPredictions.map((p) => [p.matchId, p])
   );
 
-  return (
-    <div className="space-y-6">
-      {playoffRounds.map((round) => {
-        if (round.status === "sin_abrir") {
-          return (
-            <section key={round.id} className="space-y-2">
-              <h3 className="font-semibold text-base">{round.name}</h3>
-              <p className="text-xs text-muted-foreground">Ronda sin abrir.</p>
-            </section>
-          );
-        }
+  const sections: PanelSection[] = [];
+  for (const round of playoffRounds) {
+    if (round.status === "sin_abrir") {
+      sections.push({
+        id: round.id,
+        title: round.name,
+        subtitle: "Ronda sin abrir",
+        locked: true,
+        items: [],
+      });
+      continue;
+    }
 
-        const roundMatches = flatMatches
-          .filter((m) => m.roundId === round.id)
-          .sort((a, b) => a.order - b.order);
-        const locked = round.status === "cerrada";
+    const roundMatches = flatMatches
+      .filter((m) => m.roundId === round.id)
+      .sort((a, b) => a.order - b.order);
+    const locked = round.status === "cerrada";
 
-        return (
-          <section key={round.id} className="space-y-2">
-            <h3 className="font-semibold text-base">{round.name}</h3>
-            <p className="text-xs text-muted-foreground">
-              {locked ? "Cerrada (read-only)" : "Abierta"}
-            </p>
-            <div className="space-y-2">
-              {roundMatches.map((m) => {
-                const slotA = resolveSlot(
-                  { type: m.slotAType, ref: m.slotARef },
-                  ctx
-                );
-                const slotB = resolveSlot(
-                  { type: m.slotBType, ref: m.slotBRef },
-                  ctx
-                );
-                if (slotA.isBye || slotB.isBye) return null;
-                if (!slotA.team || !slotB.team) {
-                  return (
-                    <div
-                      key={m.id}
-                      className="rounded-lg border p-3 text-xs text-muted-foreground"
-                    >
-                      Partido pendiente (esperando ronda anterior)
-                    </div>
-                  );
-                }
-                const pred = predictionByMatch.get(m.id) ?? null;
-                return (
-                  <MatchPrediction
-                    key={m.id}
-                    tournamentId={tournamentId}
-                    matchId={m.id}
-                    teamA={slotA.team}
-                    teamB={slotB.team}
-                    resultWinnerId={m.resultWinnerTeamId}
-                    resultSets={m.resultSets as 2 | 3 | null}
-                    initialPrediction={
-                      pred
-                        ? {
-                            winnerTeamId: pred.predictedWinnerTeamId,
-                            sets: pred.predictedSets as 2 | 3,
-                          }
-                        : null
-                    }
-                    locked={locked}
-                  />
-                );
-              })}
-            </div>
-          </section>
-        );
-      })}
-    </div>
-  );
+    const items: PanelItem[] = [];
+    for (const m of roundMatches) {
+      const slotA = resolveSlot({ type: m.slotAType, ref: m.slotARef }, ctx);
+      const slotB = resolveSlot({ type: m.slotBType, ref: m.slotBRef }, ctx);
+      if (slotA.isBye || slotB.isBye) continue;
+      if (!slotA.team || !slotB.team) {
+        items.push({
+          kind: "pending",
+          key: m.id,
+          label: "Partido pendiente (esperando ronda anterior)",
+        });
+        continue;
+      }
+      const pred = predictionByMatch.get(m.id) ?? null;
+      items.push({
+        kind: "playable",
+        matchId: m.id,
+        teamA: slotA.team,
+        teamB: slotB.team,
+        resultWinnerId: m.resultWinnerTeamId,
+        resultSets: m.resultSets as 2 | 3 | null,
+        initialPrediction: pred
+          ? {
+              winnerTeamId: pred.predictedWinnerTeamId,
+              sets: pred.predictedSets as 2 | 3,
+            }
+          : null,
+      });
+    }
+
+    sections.push({
+      id: round.id,
+      title: round.name,
+      subtitle: locked ? "Cerrada (read-only)" : "Abierta",
+      locked,
+      items,
+    });
+  }
+
+  return <PredictionsPanel tournamentId={tournamentId} sections={sections} />;
 }

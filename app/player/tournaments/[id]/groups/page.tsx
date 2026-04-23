@@ -10,7 +10,11 @@ import {
 } from "@/db/schema";
 import { auth } from "@/lib/auth";
 import { resolveSlot, type SlotResolverCtx } from "@/lib/slot-resolver";
-import { MatchPrediction } from "./match-prediction";
+import {
+  PredictionsPanel,
+  type PanelItem,
+  type PanelSection,
+} from "@/components/predictions/predictions-panel";
 
 export default async function PlayerGroupsPage({
   params,
@@ -101,69 +105,53 @@ export default async function PlayerGroupsPage({
 
   const locked = round.status === "cerrada";
 
+  const sections: PanelSection[] = groupsRows.map((g) => {
+    const grpMatches = (matchesByGroup.get(g.id) ?? []).sort(
+      (a, b) => a.order - b.order
+    );
+    const items: PanelItem[] = [];
+    for (const m of grpMatches) {
+      const slotA = resolveSlot({ type: m.slotAType, ref: m.slotARef }, ctx);
+      const slotB = resolveSlot({ type: m.slotBType, ref: m.slotBRef }, ctx);
+      if (slotA.isBye || slotB.isBye) continue;
+      if (!slotA.team || !slotB.team) {
+        items.push({
+          kind: "pending",
+          key: m.id,
+          label: "Partido pendiente (esperando resultados anteriores)",
+        });
+        continue;
+      }
+      const pred = predictionByMatch.get(m.id) ?? null;
+      items.push({
+        kind: "playable",
+        matchId: m.id,
+        teamA: slotA.team,
+        teamB: slotB.team,
+        resultWinnerId: m.resultWinnerTeamId,
+        resultSets: m.resultSets as 2 | 3 | null,
+        initialPrediction: pred
+          ? {
+              winnerTeamId: pred.predictedWinnerTeamId,
+              sets: pred.predictedSets as 2 | 3,
+            }
+          : null,
+      });
+    }
+    return {
+      id: g.id,
+      title: g.name,
+      locked,
+      items,
+    };
+  });
+
   return (
-    <div className="space-y-6">
+    <>
       <div className="text-xs text-muted-foreground">
         Ronda: {round.status === "abierta" ? "abierta" : "cerrada (read-only)"}
       </div>
-      {groupsRows.map((g) => {
-        const grpMatches = (matchesByGroup.get(g.id) ?? []).sort(
-          (a, b) => a.order - b.order
-        );
-        return (
-          <section key={g.id} className="space-y-2">
-            <h2 className="text-base font-semibold">{g.name}</h2>
-            {grpMatches.length === 0 ? (
-              <p className="text-sm text-muted-foreground">Sin partidos.</p>
-            ) : (
-              <div className="space-y-2">
-                {grpMatches.map((m) => {
-                  const slotA = resolveSlot(
-                    { type: m.slotAType, ref: m.slotARef },
-                    ctx
-                  );
-                  const slotB = resolveSlot(
-                    { type: m.slotBType, ref: m.slotBRef },
-                    ctx
-                  );
-                  if (slotA.isBye || slotB.isBye) return null;
-                  if (!slotA.team || !slotB.team) {
-                    return (
-                      <div
-                        key={m.id}
-                        className="rounded-lg border p-3 text-xs text-muted-foreground"
-                      >
-                        Partido pendiente (esperando resultados anteriores)
-                      </div>
-                    );
-                  }
-                  const pred = predictionByMatch.get(m.id) ?? null;
-                  return (
-                    <MatchPrediction
-                      key={m.id}
-                      tournamentId={tournamentId}
-                      matchId={m.id}
-                      teamA={slotA.team}
-                      teamB={slotB.team}
-                      resultWinnerId={m.resultWinnerTeamId}
-                      resultSets={m.resultSets as 2 | 3 | null}
-                      initialPrediction={
-                        pred
-                          ? {
-                              winnerTeamId: pred.predictedWinnerTeamId,
-                              sets: pred.predictedSets as 2 | 3,
-                            }
-                          : null
-                      }
-                      locked={locked}
-                    />
-                  );
-                })}
-              </div>
-            )}
-          </section>
-        );
-      })}
-    </div>
+      <PredictionsPanel tournamentId={tournamentId} sections={sections} />
+    </>
   );
 }

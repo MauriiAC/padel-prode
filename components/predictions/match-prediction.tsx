@@ -1,13 +1,10 @@
 "use client";
 
-import { useState, useTransition, useRef, useEffect } from "react";
-import { toast } from "sonner";
-import { upsertPredictionAction } from "@/actions/predictions";
 import { computeScore } from "@/lib/scoring";
 import { cn } from "@/lib/utils";
 
 type Team = { id: string; name: string };
-type Prediction = { winnerTeamId: string; sets: 2 | 3 };
+export type PredictionValue = { winnerTeamId: string; sets: 2 | 3 };
 
 function ScoreBadge({ score }: { score: 0 | 1 | 2 }) {
   const label = score === 0 ? "0 pts" : score === 1 ? "+1 pt" : "+2 pts";
@@ -26,78 +23,56 @@ function ScoreBadge({ score }: { score: 0 | 1 | 2 }) {
 }
 
 export function MatchPrediction({
-  tournamentId,
   matchId,
   teamA,
   teamB,
   resultWinnerId,
   resultSets,
-  initialPrediction,
+  value,
+  onChange,
   locked,
+  dirty,
 }: {
-  tournamentId: string;
   matchId: string;
   teamA: Team;
   teamB: Team;
   resultWinnerId: string | null;
   resultSets: 2 | 3 | null;
-  initialPrediction: Prediction | null;
+  value: PredictionValue | null;
+  onChange: (next: PredictionValue) => void;
   locked: boolean;
+  dirty?: boolean;
 }) {
-  const [pred, setPred] = useState<Prediction | null>(initialPrediction);
-  const [pending, startTransition] = useTransition();
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-    };
-  }, []);
-
-  function save(next: Prediction) {
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => {
-      startTransition(async () => {
-        const res = await upsertPredictionAction(
-          matchId,
-          tournamentId,
-          next.winnerTeamId,
-          next.sets
-        );
-        if (!res.ok) toast.error(res.error);
-      });
-    }, 300);
-  }
-
-  function onWinnerChange(winnerTeamId: string) {
-    const next: Prediction = { winnerTeamId, sets: pred?.sets ?? 2 };
-    setPred(next);
-    if (!locked) save(next);
-  }
-
-  function onSetsChange(sets: 2 | 3) {
-    if (!pred) return;
-    const next: Prediction = { ...pred, sets };
-    setPred(next);
-    if (!locked) save(next);
-  }
-
   const resultLoaded = resultWinnerId != null && resultSets != null;
   const score = resultLoaded
     ? computeScore(
-        pred
+        value
           ? {
-              predictedWinnerTeamId: pred.winnerTeamId,
-              predictedSets: pred.sets,
+              predictedWinnerTeamId: value.winnerTeamId,
+              predictedSets: value.sets,
             }
           : null,
         { resultWinnerTeamId: resultWinnerId, resultSets: resultSets }
       )
     : null;
 
+  function onWinnerChange(winnerTeamId: string) {
+    onChange({ winnerTeamId, sets: value?.sets ?? 2 });
+  }
+
+  function onSetsChange(sets: 2 | 3) {
+    if (!value) return;
+    onChange({ ...value, sets });
+  }
+
   return (
-    <div className="rounded-lg border p-3 space-y-2">
-      <div className="flex items-center justify-between gap-2">
+    <div
+      className={cn(
+        "rounded-lg border p-3 space-y-2 transition-colors",
+        dirty && !locked && "border-accent bg-accent/5"
+      )}
+    >
+      <div className="flex items-center justify-between gap-2 flex-wrap">
         <span className="text-sm font-medium">
           {teamA.name} vs {teamB.name}
         </span>
@@ -111,7 +86,7 @@ export function MatchPrediction({
           {score !== null && <ScoreBadge score={score} />}
         </div>
       </div>
-      <div className="flex gap-4">
+      <div className="flex flex-wrap gap-4">
         <fieldset className="flex gap-3 items-center" disabled={locked}>
           <legend className="sr-only">Ganador</legend>
           {[teamA, teamB].map((t) => (
@@ -119,7 +94,7 @@ export function MatchPrediction({
               <input
                 type="radio"
                 name={`winner-${matchId}`}
-                checked={pred?.winnerTeamId === t.id}
+                checked={value?.winnerTeamId === t.id}
                 onChange={() => onWinnerChange(t.id)}
               />
               {t.name}
@@ -128,7 +103,7 @@ export function MatchPrediction({
         </fieldset>
         <fieldset
           className="flex gap-3 items-center"
-          disabled={locked || !pred}
+          disabled={locked || !value}
         >
           <legend className="sr-only">Sets</legend>
           {([2, 3] as const).map((s) => (
@@ -136,7 +111,7 @@ export function MatchPrediction({
               <input
                 type="radio"
                 name={`sets-${matchId}`}
-                checked={pred?.sets === s}
+                checked={value?.sets === s}
                 onChange={() => onSetsChange(s)}
               />
               {s} sets
@@ -144,7 +119,6 @@ export function MatchPrediction({
           ))}
         </fieldset>
       </div>
-      {pending && <p className="text-xs text-muted-foreground">Guardando...</p>}
     </div>
   );
 }
