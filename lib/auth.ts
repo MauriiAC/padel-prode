@@ -23,28 +23,46 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         password: {},
       },
       async authorize(rawCredentials) {
-        const parsed = loginSchema.safeParse(rawCredentials);
-        if (!parsed.success) return null;
+        try {
+          const parsed = loginSchema.safeParse(rawCredentials);
+          if (!parsed.success) {
+            console.warn("[auth] credentials shape invalid", parsed.error.flatten());
+            return null;
+          }
 
-        const { email, password } = parsed.data;
-        const [user] = await db
-          .select()
-          .from(users)
-          .where(eq(users.email, email.toLowerCase()))
-          .limit(1);
+          const { email, password } = parsed.data;
+          const lowered = email.toLowerCase();
 
-        if (!user) return null;
+          const [user] = await db
+            .select()
+            .from(users)
+            .where(eq(users.email, lowered))
+            .limit(1);
 
-        const valid = await verifyPassword(password, user.passwordHash);
-        if (!valid) return null;
+          if (!user) {
+            console.warn(`[auth] user not found for email=${lowered}`);
+            return null;
+          }
 
-        return {
-          id: user.id,
-          email: user.email,
-          name: user.name,
-          role: user.role,
-          mustChangePassword: user.mustChangePassword,
-        };
+          const valid = await verifyPassword(password, user.passwordHash);
+          if (!valid) {
+            console.warn(`[auth] password mismatch for email=${lowered}`);
+            return null;
+          }
+
+          return {
+            id: user.id,
+            email: user.email,
+            name: user.name,
+            role: user.role,
+            mustChangePassword: user.mustChangePassword,
+          };
+        } catch (err) {
+          // Auth.js otherwise swallows this and surfaces a generic
+          // CredentialsSignin error. Log it so we can diagnose env / DB issues.
+          console.error("[auth] authorize threw", err);
+          return null;
+        }
       },
     }),
   ],
